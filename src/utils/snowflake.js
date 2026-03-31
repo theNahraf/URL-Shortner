@@ -11,7 +11,7 @@
  * This guarantees uniqueness across distributed nodes.
  */
 
-const CUSTOM_EPOCH = 1704067200000n; // 2024-01-01T00:00:00Z
+const CUSTOM_EPOCH = 1704067200000n; // 2026-01-01T00:00:00Z
 const MACHINE_BITS = 10n;
 const SEQUENCE_BITS = 12n;
 
