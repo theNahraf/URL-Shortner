@@ -82,7 +82,7 @@ const swaggerSpec = swaggerJsdoc({
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'Sniplink API Docs',
+  customSiteTitle: 'Nanourl API Docs',
 }));
 
 // Health check

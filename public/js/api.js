@@ -1,11 +1,11 @@
 /**
- * Sniplink — API Client
+ * Nanourl — API Client
  * Handles all API calls with JWT token management
  */
 
 const API_BASE = '/api';
 
-class SniplinkAPI {
+class NanourlAPI {
   constructor() {
     this.accessToken = localStorage.getItem('accessToken');
     this.user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -201,7 +201,7 @@ class SniplinkAPI {
 }
 
 // Global instance
-window.api = new SniplinkAPI();
+window.api = new NanourlAPI();
 
 // Toast utility
 window.showToast = function(message, type = 'info') {
