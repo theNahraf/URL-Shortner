@@ -1,11 +1,11 @@
 /**
- * Nanourl — API Client
+ * NanoURL — API Client
  * Handles all API calls with JWT token management
  */
 
 const API_BASE = '/api';
 
-class NanourlAPI {
+class NanoURLAPI {
   constructor() {
     this.accessToken = localStorage.getItem('accessToken');
     this.user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -201,10 +201,10 @@ class NanourlAPI {
 }
 
 // Global instance
-window.api = new NanourlAPI();
+window.api = new NanoURLAPI();
 
 // Toast utility
-window.showToast = function(message, type = 'info') {
+window.showToast = function (message, type = 'info') {
   let container = document.querySelector('.toast-container');
   if (!container) {
     container = document.createElement('div');
@@ -228,7 +228,7 @@ window.showToast = function(message, type = 'info') {
 };
 
 // Copy to clipboard utility
-window.copyToClipboard = async function(text) {
+window.copyToClipboard = async function (text) {
   try {
     await navigator.clipboard.writeText(text);
     showToast('Copied to clipboard!', 'success');

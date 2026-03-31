@@ -1,4 +1,4 @@
-# Nanourl URL Shortener — Task Tracker
+# NanoURL URL Shortener — Task Tracker
 
 ## Backend
 - [x] Project scaffold (package.json, Docker, .env)

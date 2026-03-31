@@ -21,7 +21,7 @@ async function start() {
       console.log(`
 ╔══════════════════════════════════════════════╗
 ║                                              ║
-║   🔗 Nanourl URL Shortener                 ║
+║   🔗 NanoURL URL Shortener                 ║
 ║                                              ║
 ║   Server:    ${env.BASE_URL.padEnd(28)}   ║
 ║   API Docs:  ${(env.BASE_URL + '/api-docs').padEnd(28)}   ║
