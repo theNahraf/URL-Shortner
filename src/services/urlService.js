@@ -146,7 +146,7 @@ async function shortenUrl(longUrl, options = {}, user = null) {
   return {
     id: url.id,
     shortCode: url.short_code,
-    shortUrl: `${env.BASE_URL}/${url.short_code}`,
+    shortUrl: `${env.SHORT_BASE_URL}/${url.short_code}`,
     longUrl: url.long_url,
     expiresAt: url.expires_at,
     oneTime: url.one_time,
@@ -352,7 +352,7 @@ function formatLink(link) {
   return {
     id: link.id,
     shortCode: link.short_code,
-    shortUrl: `${env.BASE_URL}/${link.short_code}`,
+    shortUrl: `${env.SHORT_BASE_URL}/${link.short_code}`,
     longUrl: link.long_url,
     title: link.title,
     customAlias: link.custom_alias,

@@ -4,6 +4,7 @@ const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT, 10) || 3000,
   BASE_URL: (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, ''),
+  SHORT_BASE_URL: (process.env.BASE_URL || 'localhost:3000').replace(/\/$/, '').replace(/^https?:\/\/(www\.)?/, ''),
 
   // Database
   DATABASE_URL: process.env.DATABASE_URL,
