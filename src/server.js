@@ -4,8 +4,12 @@ const { initBlacklist } = require('./utils/blacklist');
 
 async function start() {
   try {
-    // Initialize blacklist
-    await initBlacklist();
+    // Initialize blacklist (graceful — works with or without Redis)
+    try {
+      await initBlacklist();
+    } catch (err) {
+      console.warn('⚠️ Blacklist init failed (non-fatal):', err.message);
+    }
 
     // Start analytics worker in same process for dev
     if (env.NODE_ENV === 'development') {

@@ -1,31 +1,42 @@
 const db = require('../config/database');
-const { redis } = require('../config/redis');
+const { redis, isRedisAvailable, safeRedisGet, safeRedisSet, safeRedisDel } = require('../config/redis');
 const SnowflakeGenerator = require('../utils/snowflake');
 const base62 = require('../utils/base62');
 const { validateUrl } = require('../utils/urlValidator');
 const { isBlacklisted } = require('../utils/blacklist');
 const { AppError } = require('../middleware/errorHandler');
 const env = require('../config/env');
-const { Queue } = require('bullmq');
-const { createBullConnection } = require('../config/redis');
 
 // Initialize Snowflake generator
 const snowflake = new SnowflakeGenerator(env.MACHINE_ID);
 
-// Analytics queue
-let analyticsQueue;
-try {
-  analyticsQueue = new Queue('analytics', {
-    connection: createBullConnection(),
-    defaultJobOptions: {
-      removeOnComplete: 1000,
-      removeOnFail: 5000,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
-    },
-  });
-} catch (err) {
-  console.warn('⚠️ Analytics queue not initialized:', err.message);
+// Analytics queue — lazy initialized, only when Redis is available
+let analyticsQueue = null;
+
+function getAnalyticsQueue() {
+  if (analyticsQueue) return analyticsQueue;
+  if (!isRedisAvailable()) return null;
+
+  try {
+    const { Queue } = require('bullmq');
+    const { createBullConnection } = require('../config/redis');
+    const conn = createBullConnection();
+    if (!conn) return null;
+
+    analyticsQueue = new Queue('analytics', {
+      connection: conn,
+      defaultJobOptions: {
+        removeOnComplete: 1000,
+        removeOnFail: 5000,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 1000 },
+      },
+    });
+    return analyticsQueue;
+  } catch (err) {
+    console.warn('⚠️ Analytics queue not initialized:', err.message);
+    return null;
+  }
 }
 
 // Plan limits for link creation
@@ -37,6 +48,47 @@ const PLAN_LIMITS = {
 
 const CACHE_TTL = 3600; // 1 hour
 const CACHE_PREFIX = 'url:';
+
+/**
+ * Track analytics directly in the database (fallback when Redis/BullMQ is unavailable)
+ */
+async function trackAnalyticsDirect(data) {
+  try {
+    const UAParser = require('ua-parser-js');
+    const geoip = require('geoip-lite');
+
+    const ua = new UAParser(data.userAgent);
+    const device = ua.getDevice().type || 'desktop';
+    const browser = ua.getBrowser().name || 'Unknown';
+    const os = ua.getOS().name || 'Unknown';
+
+    let country = 'Unknown';
+    let city = 'Unknown';
+
+    if (data.ip && data.ip !== '::1' && data.ip !== '127.0.0.1') {
+      const geo = geoip.lookup(data.ip);
+      if (geo) {
+        country = geo.country || 'Unknown';
+        city = geo.city || 'Unknown';
+      }
+    }
+
+    await db('analytics').insert({
+      url_id: data.urlId,
+      ip_address: data.ip === '::1' ? '127.0.0.1' : data.ip,
+      country,
+      city,
+      device,
+      browser,
+      os,
+      referer: data.referer || null,
+      created_at: data.timestamp || new Date(),
+    });
+  } catch (err) {
+    // Analytics failure should never crash the redirect
+    console.error('⚠️ Direct analytics insert failed:', err.message);
+  }
+}
 
 /**
  * Shorten a URL
@@ -135,8 +187,8 @@ async function shortenUrl(longUrl, options = {}, user = null) {
     })
     .returning('*');
 
-  // Cache in Redis
-  await redis.set(`${CACHE_PREFIX}${shortCode}`, longUrl, 'EX', CACHE_TTL);
+  // Cache in Redis (safe — no-op if Redis is down)
+  await safeRedisSet(`${CACHE_PREFIX}${shortCode}`, longUrl, 'EX', CACHE_TTL);
 
   // Increment user's monthly link count
   if (user) {
@@ -159,20 +211,20 @@ async function shortenUrl(longUrl, options = {}, user = null) {
  * Resolve a short code to its long URL (for redirect)
  */
 async function resolveUrl(shortCode, requestMeta = {}) {
-  // 1. Check Redis cache first
-  let longUrl = await redis.get(`${CACHE_PREFIX}${shortCode}`);
+  // 1. Check Redis cache first (safe — returns null if Redis is down)
+  let longUrl = await safeRedisGet(`${CACHE_PREFIX}${shortCode}`);
   let urlRecord = null;
 
   if (longUrl) {
     // Still need to check expiry and one-time status from DB
     urlRecord = await db('urls').where({ short_code: shortCode }).first();
   } else {
-    // 2. Cache miss — query DB
+    // 2. Cache miss (or Redis down) — query DB
     urlRecord = await db('urls').where({ short_code: shortCode }).first();
     if (urlRecord) {
       longUrl = urlRecord.long_url;
-      // Cache for next time
-      await redis.set(`${CACHE_PREFIX}${shortCode}`, longUrl, 'EX', CACHE_TTL);
+      // Cache for next time (safe — no-op if Redis is down)
+      await safeRedisSet(`${CACHE_PREFIX}${shortCode}`, longUrl, 'EX', CACHE_TTL);
     }
   }
 
@@ -182,7 +234,7 @@ async function resolveUrl(shortCode, requestMeta = {}) {
 
   // Check expiration
   if (urlRecord.expires_at && new Date(urlRecord.expires_at) < new Date()) {
-    await redis.del(`${CACHE_PREFIX}${shortCode}`);
+    await safeRedisDel(`${CACHE_PREFIX}${shortCode}`);
     throw new AppError('This link has expired', 410, 'URL_EXPIRED');
   }
 
@@ -201,21 +253,35 @@ async function resolveUrl(shortCode, requestMeta = {}) {
   // Handle one-time links
   if (urlRecord.one_time) {
     await db('urls').where({ id: urlRecord.id }).update({ is_active: false });
-    await redis.del(`${CACHE_PREFIX}${shortCode}`);
+    await safeRedisDel(`${CACHE_PREFIX}${shortCode}`);
   }
 
   // Increment click count (fast, inline)
   await db('urls').where({ id: urlRecord.id }).increment('click_count', 1);
 
-  // Queue async analytics
-  if (analyticsQueue) {
-    await analyticsQueue.add('track-click', {
-      urlId: urlRecord.id,
-      ip: requestMeta.ip,
-      userAgent: requestMeta.userAgent,
-      referer: requestMeta.referer,
-      timestamp: new Date().toISOString(),
-    });
+  // Queue async analytics — try BullMQ first, fall back to direct DB insert
+  const queue = getAnalyticsQueue();
+  const analyticsData = {
+    urlId: urlRecord.id,
+    ip: requestMeta.ip,
+    userAgent: requestMeta.userAgent,
+    referer: requestMeta.referer,
+    timestamp: new Date().toISOString(),
+  };
+
+  if (queue) {
+    try {
+      await queue.add('track-click', analyticsData);
+    } catch (err) {
+      console.warn('⚠️ BullMQ queue failed, falling back to direct insert:', err.message);
+      // Reset queue so next request doesn't try a broken connection
+      analyticsQueue = null;
+      // Direct insert as fallback (non-blocking)
+      trackAnalyticsDirect(analyticsData);
+    }
+  } else {
+    // No Redis/BullMQ available — insert analytics directly into DB
+    trackAnalyticsDirect(analyticsData);
   }
 
   return { longUrl, statusCode: urlRecord.one_time ? 302 : 301 };
@@ -316,12 +382,12 @@ async function updateLink(linkId, userId, updates) {
     .update(allowedUpdates)
     .returning('*');
 
-  // Invalidate cache
-  await redis.del(`${CACHE_PREFIX}${link.short_code}`);
+  // Invalidate cache (safe)
+  await safeRedisDel(`${CACHE_PREFIX}${link.short_code}`);
 
-  // Re-cache if URL changed
+  // Re-cache if URL changed (safe)
   if (updates.longUrl) {
-    await redis.set(`${CACHE_PREFIX}${link.short_code}`, updates.longUrl, 'EX', CACHE_TTL);
+    await safeRedisSet(`${CACHE_PREFIX}${link.short_code}`, updates.longUrl, 'EX', CACHE_TTL);
   }
 
   return formatLink(updated);
@@ -337,7 +403,7 @@ async function deleteLink(linkId, userId) {
   }
 
   await db('urls').where({ id: linkId }).del();
-  await redis.del(`${CACHE_PREFIX}${link.short_code}`);
+  await safeRedisDel(`${CACHE_PREFIX}${link.short_code}`);
 
   // Decrement user's monthly count
   await db('users').where({ id: userId }).decrement('links_created_this_month', 1);

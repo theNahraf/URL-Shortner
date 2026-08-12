@@ -1,4 +1,4 @@
-const { redis } = require('../config/redis');
+const { redis, isRedisAvailable } = require('../config/redis');
 const env = require('../config/env');
 
 /**
@@ -82,7 +82,7 @@ const TOKEN_BUCKET_SCRIPT = `
 function createRateLimiter(actionType = 'general') {
   return async (req, res, next) => {
     if (!env.RATE_LIMIT_ENABLED) return next();
-
+    if (!isRedisAvailable()) return next(); // Fail-open: skip rate limiting when Redis is down
     try {
       const tier = req.user ? (req.user.plan_type || 'free') : 'unauthenticated';
       const limits = TIER_LIMITS[tier]?.[actionType] || TIER_LIMITS.unauthenticated.general;
