@@ -33,6 +33,23 @@ async function start() {
 ║                                              ║
 ╚══════════════════════════════════════════════╝
       `);
+
+      // Self-ping to keep Render free tier alive (every 12 minutes)
+      if (env.NODE_ENV === 'production' && env.BASE_URL) {
+        const PING_INTERVAL = 12 * 60 * 1000; // 12 minutes
+        const pingUrl = `${env.BASE_URL}/api/health`;
+        const httpModule = pingUrl.startsWith('https') ? require('https') : require('http');
+
+        setInterval(() => {
+          httpModule.get(pingUrl, (res) => {
+            console.log(`🏓 Self-ping: ${res.statusCode}`);
+          }).on('error', (err) => {
+            console.warn('⚠️ Self-ping failed:', err.message);
+          });
+        }, PING_INTERVAL);
+
+        console.log(`🏓 Self-ping enabled — hitting ${pingUrl} every 12 minutes`);
+      }
     });
   } catch (err) {
     console.error('❌ Failed to start server:', err);
